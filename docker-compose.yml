@@ -1,0 +1,155 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database - Production Ready
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: digital_pardna
+      POSTGRES_USER: pardna_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_secure_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "5432:5432"
+    networks:
+      - pardna-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pardna_user -d digital_pardna"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis Cache for Sessions & Performance
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - pardna-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # API Server - Production Build
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: production
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://pardna_user:${POSTGRES_PASSWORD:-your_secure_password}@postgres:5432/digital_pardna
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      PORT: 4000
+      NODE_ENV: production
+      LOG_LEVEL: info
+    env_file:
+      - apps/api/.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pardna-network
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Web Frontend - Production Build
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: production
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:4000/v1}
+      NODE_ENV: production
+    env_file:
+      - apps/web/.env.local
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - pardna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Background Keeper Service
+  keeper:
+    build:
+      context: .
+      dockerfile: apps/keeper/Dockerfile
+      target: production
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://pardna_user:${POSTGRES_PASSWORD:-your_secure_password}@postgres:5432/digital_pardna
+      API_URL: http://api:4000/v1
+      NODE_ENV: production
+      LOG_LEVEL: info
+    env_file:
+      - apps/keeper/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - pardna-network
+    volumes:
+      - ./logs:/app/logs
+
+  # Nginx Reverse Proxy & Load Balancer
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+      - web-static:/var/www/static
+    depends_on:
+      - web
+      - api
+    networks:
+      - pardna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+  web-static:
+
+networks:
+  pardna-network:
+    driver: bridge

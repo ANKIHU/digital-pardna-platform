@@ -1,0 +1,24 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/api/package.json ./apps/api/
+
+# Install pnpm and dependencies
+RUN npm install -g pnpm
+RUN pnpm install --frozen-lockfile
+
+# Copy source code and schema
+COPY apps/api ./apps/api/
+
+# Generate Prisma client
+RUN cd apps/api && npx prisma generate
+
+# Build the application
+RUN cd apps/api && npm run build || echo "No build script found"
+
+EXPOSE 3001
+
+CMD ["sh", "-c", "cd apps/api && npx prisma generate && npm start"]

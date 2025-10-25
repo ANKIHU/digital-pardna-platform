@@ -1,0 +1,323 @@
+# Digital Pardna AWS Infrastructure for PardnaLink Account
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+  
+  default_tags {
+    tags = {
+      Project     = "PardnaLink"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Application = "digital-pardna"
+    }
+  }
+}
+
+# Variables
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "production"
+}
+
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "digital-pardna"
+}
+
+variable "domain_name" {
+  description = "Domain name for the application"
+  type        = string
+  default     = "pardnalink.com"
+}
+
+# Use existing VPC
+data "aws_vpc" "existing" {
+  id = "vpc-0453830bd87ac50d9"  # Your current VPC
+}
+
+# Get existing subnets from your VPC
+data "aws_subnets" "existing" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
+}
+
+# Get availability zones in current region
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Create additional subnets if needed
+resource "aws_subnet" "private" {
+  count             = 2
+  vpc_id            = data.aws_vpc.existing.id
+  cidr_block        = "172.31.${count.index + 100}.0/24"
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+
+  tags = {
+    Name        = "${var.app_name}-private-subnet-${count.index + 1}"
+    Environment = var.environment
+  }
+}
+
+# Internet Gateway (use existing or create new)
+data "aws_internet_gateway" "existing" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
+}
+
+# NAT Gateway for private subnets
+resource "aws_eip" "nat" {
+  count  = 2
+  domain = "vpc"
+
+  tags = {
+    Name        = "${var.app_name}-nat-eip-${count.index + 1}"
+    Environment = var.environment
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  count         = 2
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = data.aws_subnets.existing.ids[count.index]
+
+  tags = {
+    Name        = "${var.app_name}-nat-${count.index + 1}"
+    Environment = var.environment
+  }
+
+  depends_on = [data.aws_internet_gateway.existing]
+}
+
+# Route Tables for private subnets
+resource "aws_route_table" "private" {
+  count  = 2
+  vpc_id = data.aws_vpc.existing.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main[count.index].id
+  }
+
+  tags = {
+    Name        = "${var.app_name}-private-rt-${count.index + 1}"
+    Environment = var.environment
+  }
+}
+
+# Route Table Associations for private subnets
+resource "aws_route_table_association" "private" {
+  count          = 2
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+# Security Groups
+resource "aws_security_group" "alb" {
+  name_prefix = "${var.app_name}-alb-"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.app_name}-alb-sg"
+    Environment = var.environment
+  }
+}
+
+resource "aws_security_group" "ecs" {
+  name_prefix = "${var.app_name}-ecs-"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    from_port       = 4000
+    to_port         = 4000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.app_name}-ecs-sg"
+    Environment = var.environment
+  }
+}
+
+resource "aws_security_group" "rds" {
+  name_prefix = "${var.app_name}-rds-"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  tags = {
+    Name        = "${var.app_name}-rds-sg"
+    Environment = var.environment
+  }
+}
+
+# RDS Subnet Group
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.app_name}-db-subnet-group"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = {
+    Name        = "${var.app_name}-db-subnet-group"
+    Environment = var.environment
+  }
+}
+
+# RDS Instance
+resource "aws_db_instance" "main" {
+  identifier                = "${var.app_name}-db"
+  allocated_storage         = 20
+  max_allocated_storage     = 100
+  storage_type              = "gp2"
+  engine                    = "postgres"
+  engine_version            = "15.4"
+  instance_class            = "db.t3.micro"
+  db_name                   = "digital_pardna"
+  username                  = "pardna_user"
+  password                  = random_password.db_password.result
+  parameter_group_name      = "default.postgres15"
+  db_subnet_group_name      = aws_db_subnet_group.main.name
+  vpc_security_group_ids    = [aws_security_group.rds.id]
+  backup_retention_period   = 7
+  backup_window             = "02:00-03:00"
+  maintenance_window        = "sun:03:00-sun:04:00"
+  storage_encrypted         = true
+  deletion_protection       = false  # Set to true for production
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.app_name}-final-snapshot"
+
+  tags = {
+    Name        = "${var.app_name}-db"
+    Environment = var.environment
+  }
+}
+
+# Random password for database
+resource "random_password" "db_password" {
+  length  = 32
+  special = true
+}
+
+# ElastiCache for Redis
+resource "aws_elasticache_subnet_group" "main" {
+  name       = "${var.app_name}-cache-subnet"
+  subnet_ids = aws_subnet.private[*].id
+}
+
+resource "aws_elasticache_replication_group" "main" {
+  replication_group_id       = "${var.app_name}-redis"
+  description                = "Redis cluster for Digital Pardna"
+  node_type                  = "cache.t3.micro"
+  port                       = 6379
+  parameter_group_name       = "default.redis7"
+  num_cache_clusters         = 1
+  automatic_failover_enabled = false  # Set to true with 2+ clusters for production
+  subnet_group_name          = aws_elasticache_subnet_group.main.name
+  security_group_ids         = [aws_security_group.ecs.id]
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  auth_token                 = random_password.redis_password.result
+
+  tags = {
+    Name        = "${var.app_name}-redis"
+    Environment = var.environment
+  }
+}
+
+resource "random_password" "redis_password" {
+  length  = 32
+  special = false
+}
+
+# Outputs
+output "vpc_id" {
+  value = data.aws_vpc.existing.id
+}
+
+output "existing_subnets" {
+  value = data.aws_subnets.existing.ids
+}
+
+output "private_subnet_ids" {
+  value = aws_subnet.private[*].id
+}
+
+output "database_endpoint" {
+  value     = aws_db_instance.main.endpoint
+  sensitive = true
+}
+
+output "database_password" {
+  value     = random_password.db_password.result
+  sensitive = true
+}
+
+output "redis_endpoint" {
+  value = aws_elasticache_replication_group.main.primary_endpoint_address
+}
+
+output "redis_password" {
+  value     = random_password.redis_password.result
+  sensitive = true
+}

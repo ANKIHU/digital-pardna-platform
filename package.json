@@ -1,0 +1,34 @@
+{
+  "name": "digital-pardna",
+  "private": true,
+  "version": "0.2.0",
+  "workspaces": [
+    "apps/*",
+    "contracts",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @pardna/api dev",
+    "dev:keeper": "pnpm --filter @pardna/keeper dev",
+    "dev:web": "pnpm --filter @pardna/web dev",
+    "build": "pnpm -r build",
+    "build:api": "pnpm --filter @pardna/api build",
+    "build:web": "pnpm --filter @pardna/web build",
+    "build:keeper": "pnpm --filter @pardna/keeper build",
+    "prisma:push": "pnpm --filter @pardna/api prisma:push",
+    "seed": "pnpm --filter @pardna/api seed",
+    "type-check": "pnpm -r type-check",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "test:api": "pnpm --filter @pardna/api test",
+    "test:web": "pnpm --filter @pardna/web test",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "infra:init": "cd infrastructure && terraform init",
+    "infra:plan": "cd infrastructure && terraform plan",
+    "infra:apply": "cd infrastructure && terraform apply",
+    "infra:destroy": "cd infrastructure && terraform destroy"
+  }
+}

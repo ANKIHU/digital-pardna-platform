@@ -1,0 +1,1 @@
+import Navigation from '../../components/Navigation';\nimport EnhancedRewardsDashboard from '../../components/EnhancedRewardsDashboard';\n\nexport default function RewardsPage() {\n  return (\n    <div className=\"min-h-screen bg-gray-50\">\n      <Navigation />\n      <EnhancedRewardsDashboard />\n    </div>\n  );\n}

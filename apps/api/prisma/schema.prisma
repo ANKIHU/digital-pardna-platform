@@ -1,0 +1,422 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                           String                    @id @default(uuid())
+  name                         String?
+  first_name                   String?
+  last_name                    String?
+  phone                        String?                   @unique
+  phone_number                 String?                   @unique // Alternative field name used in APIs
+  email                        String?                   @unique
+  password_hash                String?
+  kyc_status                   String                    @default("pending")
+  reputation_score             Int                       @default(600)
+  created_at                   DateTime                  @default(now())
+  last_login                   DateTime?
+  is_active                    Boolean                   @default(true)
+  email_verified               Boolean                   @default(false)
+  email_verification_code      String?
+  email_verification_expires   DateTime?
+  two_factor_method            String?                   @default("sms") // sms, email, authenticator
+  two_factor_code              String?
+  two_factor_expires           DateTime?
+  password_reset_code          String?
+  password_reset_expires       DateTime?
+  country                      String?
+  preferred_currency           String?                   @default("JMD")
+  // BOJ Compliance Fields
+  sandbox_tier                 String?                   @default("basic") // basic, standard, premium
+  risk_profile                 String?                   @default("low") // low, medium, high
+  client_segment               String?                   @default("retail") // retail, sme, institutional
+  exposure_limit               BigInt?                   @default(500000) // JMD cents (5000 JMD)
+  monthly_transaction_limit    BigInt?                   @default(5000000) // JMD cents (50000 JMD)
+  daily_transaction_limit      BigInt?                   @default(1000000) // JMD cents (10000 JMD)
+  risk_acknowledgment_date     DateTime?
+  consumer_protection_accepted Boolean                   @default(false)
+  aml_screening_status         String                    @default("pending")
+  aml_screening_date           DateTime?
+  disability_accommodations    String?                   // JSON string for accessibility needs
+  exit_request_date            DateTime?
+  wallets                      Wallet[]
+  members                      Membership[]
+  kycVerifications             KycVerification[]
+  creditChecks                 CreditCheck[]
+  notifications                Notification[]
+  communicationPreferences     CommunicationPreference?
+  riskAssessments              RiskAssessment[]
+  complaints                   Complaint[]
+  auditLogs                    AuditLog[]
+  transactionLimits            TransactionLimit[]
+  consumerProtection           ConsumerProtection[]
+  amlScreenings                AMLScreening[]
+}
+
+model Circle {
+  id               String       @id @default(uuid())
+  name             String?
+  hand_amount      BigInt
+  currency         String
+  interval_seconds Int
+  start_at         DateTime
+  payout_rule      String       @default("fixed")
+  status           String       @default("planned")
+  onchain          Boolean      @default(false)
+  onchain_chain    String?
+  onchain_address  String?
+  members          Membership[]
+  rounds           Round[]
+}
+
+model Membership {
+  id              String        @id @default(uuid())
+  circle_id       String
+  user_id         String
+  payout_position Int
+  role            String        @default("member")
+  joined_at       DateTime      @default(now())
+  circle          Circle        @relation(fields: [circle_id], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  contributions   Contribution[]
+  payouts         Payout[]
+
+  @@unique([circle_id, user_id])
+  @@unique([circle_id, payout_position])
+}
+
+model Round {
+  id            String         @id @default(uuid())
+  circle_id     String
+  index_num     Int
+  due_at        DateTime
+  status        String         @default("open")
+  circle        Circle         @relation(fields: [circle_id], references: [id], onDelete: Cascade)
+  contributions Contribution[]
+  payouts       Payout[]
+
+  @@unique([circle_id, index_num])
+}
+
+model Contribution {
+  id            String     @id @default(uuid())
+  round_id      String
+  membership_id String
+  amount        BigInt
+  status        String     @default("pending")
+  paid_at       DateTime?
+  payment_ref   String?
+  round         Round      @relation(fields: [round_id], references: [id], onDelete: Cascade)
+  membership    Membership @relation(fields: [membership_id], references: [id], onDelete: Restrict)
+
+  @@index([round_id, status])
+}
+
+model Payout {
+  id            String      @id @default(uuid())
+  round_id      String
+  membership_id String?
+  amount        BigInt
+  status        String      @default("pending")
+  paid_at       DateTime?
+  payout_ref    String?
+  round         Round       @relation(fields: [round_id], references: [id], onDelete: Cascade)
+  membership    Membership? @relation(fields: [membership_id], references: [id])
+}
+
+model Wallet {
+  id            String        @id @default(uuid())
+  user_id       String
+  balance_minor BigInt        @default(0)
+  currency      String
+  user          User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+}
+
+model Transaction {
+  id               String   @id @default(uuid())
+  wallet_id        String?
+  user_id          String?
+  type             String
+  amount           BigInt
+  currency         String   @default("JMD")
+  status           String   @default("succeeded")
+  transaction_type String   @default("transfer")
+  created_at       DateTime @default(now())
+  payout_ref       String?
+  wallet           Wallet?  @relation(fields: [wallet_id], references: [id], onDelete: Cascade)
+}
+
+// Bank Transfer Records
+model BankTransfer {
+  id           String    @id @default(uuid())
+  from_account String
+  to_account   String
+  amount       BigInt
+  currency     String
+  reference    String
+  status       String
+  bank_provider String
+  external_id  String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime? @updatedAt
+}
+
+// KYC Verification Records
+model KycVerification {
+  id                  String    @id @default(uuid())
+  user_id             String
+  verification_type   String    // 'trn', 'document', 'address'
+  document_type       String?   // 'drivers_license', 'passport', 'national_id'
+  document_number     String?
+  status              String    // 'pending', 'verified', 'failed'
+  verification_data   String?   // JSON string
+  external_session_id String?
+  verified_at         DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime? @updatedAt
+  user                User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// Credit Bureau Checks
+model CreditCheck {
+  id            String   @id @default(uuid())
+  user_id       String
+  trn           String
+  check_type    String   // 'basic', 'detailed'
+  credit_score  Int?
+  risk_rating   String?
+  status        String
+  consent_given Boolean
+  consent_date  DateTime
+  created_at    DateTime @default(now())
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// AML Transaction Monitoring
+model AmlMonitoring {
+  id                  String   @id @default(uuid())
+  transaction_id      String
+  transaction_type    String
+  amount              BigInt
+  currency            String
+  risk_level          String   // 'low', 'medium', 'high'
+  suspicious_activity Boolean  @default(false)
+  flags               String?  // JSON string array of flags like ['large_transaction', 'rapid_transactions']
+  description         String?
+  monitored_at        DateTime
+  created_at          DateTime @default(now())
+}
+
+// Regulatory Compliance Reports
+model ComplianceReport {
+  id                 String    @id @default(uuid())
+  report_type        String    // 'boj_monthly_transactions', 'nht_contributions', etc.
+  period_start       DateTime
+  period_end         DateTime
+  status             String    // 'submitted', 'pending', 'failed'
+  external_reference String?   // Reference from regulatory body
+  submitted_by       String?
+  submitted_at       DateTime?
+  created_at         DateTime  @default(now())
+}
+
+// Communication Logs
+model CommunicationLog {
+  id           String    @id @default(uuid())
+  channel      String    // 'whatsapp', 'sms', 'email'
+  direction    String    @default("outbound") // 'outbound', 'inbound'
+  recipient    String?   // Phone number or email
+  sender       String?   // For inbound messages
+  message_type String    // 'text', 'template', 'email'
+  subject      String?   // For emails
+  content      String
+  status       String    // 'sent', 'delivered', 'failed', 'read'
+  external_id  String?   // Provider message ID
+  sent_at      DateTime?
+  received_at  DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime? @updatedAt
+}
+
+// User Notifications
+model Notification {
+  id         String    @id @default(uuid())
+  user_id    String
+  type       String    // 'payment_due', 'payment_received', etc.
+  priority   String    @default("medium") // 'low', 'medium', 'high', 'urgent'
+  channels   String    // Comma-separated list: 'whatsapp,sms,email'
+  content    String    // JSON string of message content for different channels
+  status     String    // 'sent', 'failed', 'pending'
+  sent_at    DateTime?
+  read_at    DateTime?
+  created_at DateTime  @default(now())
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// User Communication Preferences
+model CommunicationPreference {
+  id                String   @id @default(uuid())
+  user_id           String   @unique
+  whatsapp_enabled  Boolean  @default(true)
+  sms_enabled       Boolean  @default(true)
+  email_enabled     Boolean  @default(true)
+  push_enabled      Boolean  @default(true)
+  marketing_enabled Boolean  @default(false)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  user              User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// Payment Processor Records (Stripe, etc.)
+model Payment {
+  id                   String    @id @default(uuid())
+  user_id              String?
+  amount               BigInt
+  currency             String
+  status               String    // 'pending', 'succeeded', 'failed', 'canceled'
+  payment_method       String    // 'stripe', 'ncb', 'scotia', 'lynk_mobile'
+  external_payment_id  String?   // Stripe payment intent ID, bank transaction ID
+  external_customer_id String?   // Stripe customer ID
+  description          String?
+  metadata             String?   // JSON string of metadata
+  created_at           DateTime  @default(now())
+  updated_at           DateTime? @updatedAt
+}
+
+// BOJ Regulatory Compliance Models
+
+// Risk Assessment Model - BOJ Section 7.5
+model RiskAssessment {
+  id                    String    @id @default(uuid())
+  user_id               String
+  assessment_type       String    // 'onboarding', 'periodic', 'transaction'
+  risk_score            Int       // 1-100 scale
+  risk_level            String    // 'low', 'medium', 'high'
+  factors_assessed      String    // JSON string of risk factors and their weights
+  mitigation_measures   String    // JSON string of applied mitigation strategies
+  assessor_id           String?   // Staff member who conducted assessment
+  assessment_date       DateTime  @default(now())
+  next_review_date      DateTime?
+  status                String    @default("active") // 'active', 'superseded', 'archived'
+  compliance_notes      String?
+  user                  User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// Complaint Handling - BOJ Section 7.4
+model Complaint {
+  id                    String    @id @default(uuid())
+  user_id               String
+  complaint_reference   String    @unique // BOJ-required reference number
+  category              String    // 'service', 'technical', 'fraud', 'dispute', 'accessibility'
+  priority              String    @default("medium") // 'low', 'medium', 'high', 'critical'
+  status                String    @default("open") // 'open', 'investigating', 'resolved', 'closed'
+  title                 String
+  description           String
+  resolution            String?
+  resolution_date       DateTime?
+  escalation_level      Int       @default(1) // 1-4 escalation levels
+  assigned_to           String?   // Staff member handling complaint
+  customer_satisfied    Boolean?
+  satisfaction_rating   Int?      // 1-5 rating
+  accessibility_related Boolean   @default(false)
+  financial_impact      BigInt?   // JMD cents
+  regulatory_reported   Boolean   @default(false)
+  created_at            DateTime  @default(now())
+  updated_at            DateTime? @updatedAt
+  user                  User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// Audit Log - BOJ Monitoring Requirements Section 7.6
+model AuditLog {
+  id              String    @id @default(uuid())
+  user_id         String?
+  action          String    // 'login', 'transaction', 'kyc_update', 'limit_change', etc.
+  entity_type     String    // 'user', 'circle', 'transaction', 'system'
+  entity_id       String?
+  old_values      String?   // JSON string of previous state
+  new_values      String?   // JSON string of new state
+  ip_address      String?
+  user_agent      String?
+  session_id      String?
+  risk_level      String    @default("low") // 'low', 'medium', 'high'
+  compliance_flag Boolean   @default(false) // Flag for regulatory reporting
+  geolocation     String?   // JSON string of country, region for compliance
+  timestamp       DateTime  @default(now())
+  user            User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+}
+
+// Transaction Monitoring - BOJ Exposure Limits Section 7.2
+model TransactionLimit {
+  id                    String    @id @default(uuid())
+  user_id               String
+  limit_type            String    // 'daily', 'monthly', 'per_transaction', 'aggregate'
+  currency              String    @default("JMD")
+  limit_amount          BigInt    // Amount in minor currency units
+  used_amount           BigInt    @default(0)
+  reset_frequency       String    // 'daily', 'monthly', 'never'
+  last_reset            DateTime  @default(now())
+  effective_from        DateTime  @default(now())
+  effective_until       DateTime?
+  override_reason       String?   // Reason for any limit overrides
+  approved_by           String?   // Staff member who approved override
+  regulatory_basis      String    // BOJ section reference
+  user                  User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// Consumer Protection Documentation - BOJ Section 7.3
+model ConsumerProtection {
+  id                      String    @id @default(uuid())
+  user_id                 String
+  disclosure_version      String    // Version of T&C disclosed
+  risk_disclosure_shown   Boolean   @default(false)
+  risk_acknowledged       Boolean   @default(false)
+  risk_acknowledgment_ip  String?
+  consumer_segment        String    // 'retail', 'vulnerable', 'sophisticated'
+  accessibility_needs     String?   // JSON string of disabilities, language preferences
+  communication_method    String    @default("email") // Preferred method
+  redress_mechanism_shown Boolean   @default(false)
+  exit_process_explained  Boolean   @default(false)
+  data_protection_consent Boolean   @default(false)
+  marketing_consent       Boolean   @default(false)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime? @updatedAt
+  user                    User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// AML/CTF Screening - BOJ Section 7.5.c
+model AMLScreening {
+  id                    String    @id @default(uuid())
+  user_id               String
+  screening_type        String    // 'onboarding', 'ongoing', 'transaction'
+  screening_provider    String    // 'internal', 'world_check', 'refinitiv'
+  pep_status            Boolean   @default(false) // Politically Exposed Person
+  sanctions_hit         Boolean   @default(false)
+  adverse_media         Boolean   @default(false)
+  risk_rating           String    @default("low") // 'low', 'medium', 'high'
+  screening_result      String    // JSON string of detailed screening results
+  manual_review_required Boolean  @default(false)
+  reviewed_by           String?   // Compliance officer
+  review_date           DateTime?
+  review_notes          String?
+  next_screening_due    DateTime?
+  regulatory_reportable Boolean   @default(false)
+  created_at            DateTime  @default(now())
+  user                  User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// System Configuration for BOJ Compliance
+model ComplianceConfig {
+  id                    String    @id @default(uuid())
+  config_key            String    @unique
+  config_value          String
+  description           String?
+  regulatory_reference  String?   // BOJ section reference
+  last_updated          DateTime  @updatedAt
+  updated_by            String?   // Staff member
+}

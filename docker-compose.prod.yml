@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  web:
+    image: 594194992190.dkr.ecr.us-east-1.amazonaws.com/digital-pardna-web:latest
+    ports:
+      - "80:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:4000/v1
+    restart: unless-stopped
+
+  api:
+    image: 594194992190.dkr.ecr.us-east-1.amazonaws.com/digital-pardna-api:latest
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+    restart: unless-stopped

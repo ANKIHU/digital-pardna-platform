@@ -1,0 +1,260 @@
+# CloudWatch monitoring and alerting
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "${var.app_name}-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/ECS", "CPUUtilization", "ServiceName", "${var.app_name}-api", "ClusterName", "${var.app_name}-cluster"],
+            [".", "MemoryUtilization", ".", ".", ".", "."],
+            [".", "CPUUtilization", "ServiceName", "${var.app_name}-web", "ClusterName", "${var.app_name}-cluster"],
+            [".", "MemoryUtilization", ".", ".", ".", "."]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ECS Service Metrics"
+          period  = 300
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_db_instance.main.id],
+            [".", "DatabaseConnections", ".", "."],
+            [".", "ReadLatency", ".", "."],
+            [".", "WriteLatency", ".", "."]
+          ]
+          view   = "timeSeries"
+          region = var.aws_region
+          title  = "RDS Database Metrics"
+          period = 300
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", aws_lb.main.arn_suffix],
+            [".", "TargetResponseTime", ".", "."],
+            [".", "HTTPCode_Target_2XX_Count", ".", "."],
+            [".", "HTTPCode_Target_4XX_Count", ".", "."],
+            [".", "HTTPCode_Target_5XX_Count", ".", "."]
+          ]
+          view   = "timeSeries"
+          region = var.aws_region
+          title  = "Application Load Balancer Metrics"
+          period = 300
+        }
+      }
+    ]
+  })
+}
+
+# SNS Topic for Alerts
+resource "aws_sns_topic" "alerts" {
+  name = "${var.app_name}-alerts"
+
+  tags = {
+    Name        = "${var.app_name}-alerts"
+    Environment = var.environment
+  }
+}
+
+resource "aws_sns_topic_subscription" "email_alerts" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = "alerts@yourdigitalpardna.com" # Replace with actual email
+}
+
+# CloudWatch Alarms
+resource "aws_cloudwatch_metric_alarm" "api_cpu_high" {
+  alarm_name          = "${var.app_name}-api-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric monitors api cpu utilization"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ServiceName = "${var.app_name}-api"
+    ClusterName = "${var.app_name}-cluster"
+  }
+
+  tags = {
+    Name        = "${var.app_name}-api-cpu-alarm"
+    Environment = var.environment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "web_cpu_high" {
+  alarm_name          = "${var.app_name}-web-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric monitors web cpu utilization"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ServiceName = "${var.app_name}-web"
+    ClusterName = "${var.app_name}-cluster"
+  }
+
+  tags = {
+    Name        = "${var.app_name}-web-cpu-alarm"
+    Environment = var.environment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
+  alarm_name          = "${var.app_name}-rds-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric monitors rds cpu utilization"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.main.id
+  }
+
+  tags = {
+    Name        = "${var.app_name}-rds-cpu-alarm"
+    Environment = var.environment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
+  alarm_name          = "${var.app_name}-alb-response-time"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "5"
+  alarm_description   = "This metric monitors ALB response time"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    LoadBalancer = aws_lb.main.arn_suffix
+  }
+
+  tags = {
+    Name        = "${var.app_name}-alb-response-time-alarm"
+    Environment = var.environment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx_errors" {
+  alarm_name          = "${var.app_name}-alb-5xx-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = "300"
+  statistic           = "Sum"
+  threshold           = "10"
+  alarm_description   = "This metric monitors ALB 5XX errors"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    LoadBalancer = aws_lb.main.arn_suffix
+  }
+
+  tags = {
+    Name        = "${var.app_name}-alb-5xx-alarm"
+    Environment = var.environment
+  }
+}
+
+# Auto Scaling for ECS Services
+resource "aws_appautoscaling_target" "api" {
+  max_capacity       = 10
+  min_capacity       = 2
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "api_cpu" {
+  name               = "${var.app_name}-api-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.api.resource_id
+  scalable_dimension = aws_appautoscaling_target.api.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.api.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 300
+  }
+}
+
+resource "aws_appautoscaling_target" "web" {
+  max_capacity       = 10
+  min_capacity       = 2
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.web.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "web_cpu" {
+  name               = "${var.app_name}-web-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.web.resource_id
+  scalable_dimension = aws_appautoscaling_target.web.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.web.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 300
+  }
+}
+
+# Outputs for monitoring
+output "cloudwatch_dashboard_url" {
+  value = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+}
+
+output "sns_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}

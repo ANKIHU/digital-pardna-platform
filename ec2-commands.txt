@@ -1,0 +1,68 @@
+# Run these commands on EC2 to fix the deployment
+
+# 1. Stop current server
+pkill -f "node"
+
+# 2. Go to backend directory
+cd /home/ec2-user/backend
+
+# 3. Check if routes exist
+ls -la src/routes/
+
+# 4. If routes missing, create them
+mkdir -p src/routes
+
+# 5. Create circles route
+cat > src/routes/circles.js << 'EOF'
+const circlesRoutes = async (app) => {
+  app.get('/circles', async () => ({ circles: [] }));
+  app.post('/circles', async (req, reply) => {
+    reply.code(201).send({ id: 'circle-' + Date.now() });
+  });
+};
+module.exports = circlesRoutes;
+EOF
+
+# 6. Create main routes
+cat > src/routes/index.js << 'EOF'
+const circlesRoutes = require('./circles');
+
+const appRoutes = async (app) => {
+  app.get('/health', async () => ({ ok: true }));
+  await app.register(circlesRoutes);
+};
+
+module.exports = { appRoutes };
+EOF
+
+# 7. Update main server file
+cat > src/index.js << 'EOF'
+const fastify = require('fastify')({ logger: true });
+const { appRoutes } = require('./routes/index');
+
+fastify.addHook('preSerialization', async (request, reply, payload) => {
+  return JSON.parse(JSON.stringify(payload, (key, value) =>
+    typeof value === 'bigint' ? value.toString() : value
+  ));
+});
+
+fastify.register(appRoutes, { prefix: '/v1' });
+
+const start = async () => {
+  try {
+    await fastify.listen({ port: 3001, host: '0.0.0.0' });
+    console.log('✅ PardnaLink API running on port 3001');
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+};
+
+start();
+EOF
+
+# 8. Start server
+nohup node src/index.js > /var/log/pardnalink.log 2>&1 &
+
+# 9. Test
+curl http://localhost:3001/v1/health

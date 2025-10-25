@@ -1,0 +1,1 @@
+import Navigation from '../../../components/Navigation';\nimport AdminDisputesDashboard from '../../../components/AdminDisputesDashboard';\n\nexport default function AdminDisputesPage() {\n  return (\n    <div className=\"min-h-screen bg-gray-50\">\n      <Navigation />\n      <AdminDisputesDashboard />\n    </div>\n  );\n}

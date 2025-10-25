@@ -1,0 +1,1 @@
+import Navigation from '../../components/Navigation';\nimport UserBillingDashboard from '../../components/UserBillingDashboard';\n\nexport default function BillingPage() {\n  return (\n    <div className=\"min-h-screen bg-gray-50\">\n      <Navigation />\n      <UserBillingDashboard />\n    </div>\n  );\n}
